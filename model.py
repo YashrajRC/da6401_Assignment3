@@ -82,11 +82,11 @@ PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX = 1, 0, 2, 3
 # Example: if the share link is
 #   https://drive.google.com/file/d/1AbCdEfGhIjK/view?usp=sharing
 # then GDRIVE_WEIGHTS_ID = "1AbCdEfGhIjK"
-GDRIVE_WEIGHTS_ID = "PUT_YOUR_DRIVE_FILE_ID_HERE"
+GDRIVE_WEIGHTS_ID = "187c8NjOHUWPC3IkrcYgd6lFXfyGOuIWu"
 
 # Google-Drive file-id of the pickled vocab object produced on Kaggle.
 # infer() needs the vocab to map words<->indices, so we ship it too.
-GDRIVE_VOCAB_ID = "PUT_YOUR_VOCAB_DRIVE_FILE_ID_HERE"
+GDRIVE_VOCAB_ID = "14FCZPQoWu4LbNtygN9RXEvkA1FZ_vxRA"
 
 
 # ══════════════════════════════════════════════════════════════════════
