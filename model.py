@@ -48,8 +48,8 @@ DEFAULT_MAX_LEN   = 128
 PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX = 1, 0, 2, 3
 
 # Google-Drive file-ids of the trained checkpoint and the vocab bundle.
-GDRIVE_WEIGHTS_ID = "187c8NjOHUWPC3IkrcYgd6lFXfyGOuIWu"
-GDRIVE_VOCAB_ID   = "14FCZPQoWu4LbNtygN9RXEvkA1FZ_vxRA"
+GDRIVE_WEIGHTS_ID = "1JRHL0_yAVRFYQZRl0U8g4FlmSSp_j0YF"
+GDRIVE_VOCAB_ID   = "1COs30j8_WmTnKxHFQZ63ItK8Lw-6V0UN"
 
 
 # ══════════════════════════════════════════════════════════════════════
