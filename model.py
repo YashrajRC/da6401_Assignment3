@@ -37,11 +37,11 @@ except Exception:
 DEFAULT_SRC_VOCAB_SIZE = 7853       # German vocab size  (from Kaggle run)
 DEFAULT_TGT_VOCAB_SIZE = 5893       # English vocab size (from Kaggle run)
 
-DEFAULT_D_MODEL   = 512
-DEFAULT_N         = 6
-DEFAULT_NUM_HEADS = 8
-DEFAULT_D_FF      = 2048
-DEFAULT_DROPOUT   = 0.1
+DEFAULT_D_MODEL   = 256      # was 512
+DEFAULT_N         = 3        # was 6
+DEFAULT_NUM_HEADS = 8        # unchanged
+DEFAULT_D_FF      = 512      # was 2048
+DEFAULT_DROPOUT   = 0.1 
 DEFAULT_MAX_LEN   = 128
 
 # Special-token indices (must match dataset.py).
