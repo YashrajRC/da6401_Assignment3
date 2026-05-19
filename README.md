@@ -2,9 +2,7 @@
 
 # W&B Report
 
-Public W&B report link: [https://api.wandb.ai/links/da25m031-iitm-ac-in/b0gypygr]
-
-                      : [https://wandb.ai/da25m031-iitm-ac-in/da6401-a3/reports/DA6401-Assignment-3-Implementing-a-Transformer-for-Machine-Translation--VmlldzoxNjkzODIxNg?accessToken=mvpqw8oa3c7ss4i5xow0ui45wp2pf2dlfkxm0u4o2fdlxrh4v9fe59qmfqu9ynt3]
+Public W&B report link: [https://wandb.ai/da25m031-iitm-ac-in/da6401-a3/reports/DA6401-A3-Implementing-Transformer-for-Machine-Translation--VmlldzoxNjkzOTQwNA?accessToken=yv85h3f9vj51ex0ur2vc6txsh7whx3bqa3wdbj7n4ci7i8kp0p16nhtpyrvtgm1k]
 
 # Github link
 
