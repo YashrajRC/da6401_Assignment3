@@ -37,19 +37,19 @@ except Exception:
 DEFAULT_SRC_VOCAB_SIZE = 7853       # German vocab size  (from Kaggle run)
 DEFAULT_TGT_VOCAB_SIZE = 5893       # English vocab size (from Kaggle run)
 
-DEFAULT_D_MODEL   = 256      # was 512
-DEFAULT_N         = 3        # was 6
-DEFAULT_NUM_HEADS = 8        # unchanged
-DEFAULT_D_FF      = 512      # was 2048
-DEFAULT_DROPOUT   = 0.1 
+DEFAULT_D_MODEL   = 256
+DEFAULT_N         = 3
+DEFAULT_NUM_HEADS = 8
+DEFAULT_D_FF      = 512
+DEFAULT_DROPOUT   = 0.3
 DEFAULT_MAX_LEN   = 128
 
 # Special-token indices (must match dataset.py).
 PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX = 1, 0, 2, 3
 
 # Google-Drive file-ids of the trained checkpoint and the vocab bundle.
-GDRIVE_WEIGHTS_ID = "1JRHL0_yAVRFYQZRl0U8g4FlmSSp_j0YF"
-GDRIVE_VOCAB_ID   = "1COs30j8_WmTnKxHFQZ63ItK8Lw-6V0UN"
+GDRIVE_WEIGHTS_ID = "1IiSfG6r9JAdWG4tuUkSiE0cAyNb24jGJ"
+GDRIVE_VOCAB_ID   = "1KaHT6CufjH3gqb7QJtac4LqymQoODvL7"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -493,9 +493,20 @@ class Transformer(nn.Module):
 
     # ── End-to-end inference (German string -> English string) ────────
 
+    def _ids_to_sentence(self, ids) -> str:
+        """Token indices -> clean English string, dropping special tokens."""
+        words = []
+        for idx in ids:
+            if idx in (SOS_IDX, PAD_IDX):
+                continue
+            if idx == EOS_IDX:
+                break
+            words.append(self.tgt_itos[idx] if idx < len(self.tgt_itos) else "<unk>")
+        return " ".join(words).strip()
+
     @torch.no_grad()
-    def infer(self, src_sentence: str) -> str:
-        """German -> English greedy translation (fast + CPU-safe for the autograder)."""
+    def infer(self, src_sentence: str, beam_size: int = 4) -> str:
+        """German -> English translation via beam search (greedy fallback if slow)."""
         if self.src_vocab is None or self.tgt_vocab is None:
             raise RuntimeError("infer() needs vocab; build with load_pretrained=True.")
 
@@ -513,28 +524,55 @@ class Transformer(nn.Module):
         src_mask = make_src_mask(src, PAD_IDX)
         memory   = self.encode(src, src_mask)
 
-        # 4) greedy decode — cap length to stay well under the 3s autograder limit.
-        max_decode = min(50, src.size(1) + 10)        # short Multi30k sentences only
+        # 4) decode cap — large enough not to truncate, small enough to be fast.
+        max_decode = min(80, src.size(1) + 15)
+
+        # Hard wall-clock budget; if beam search overruns we return greedy.
+        import time
+        deadline = time.time() + 2.0          # leave margin under the 3s limit
+
+        # ── Beam search ───────────────────────────────────────────────
+        # Each beam = (cumulative log-prob, token-id list, finished flag).
+        beams = [(0.0, [SOS_IDX], False)]
+        for _ in range(max_decode - 1):
+            if all(fin for _, _, fin in beams):     # every beam hit <eos>
+                break
+            if time.time() > deadline:              # too slow -> bail to greedy
+                return self._greedy_infer(memory, src_mask, max_decode, device)
+
+            candidates = []
+            for logp, seq, fin in beams:
+                if fin:                              # keep finished beams as-is
+                    candidates.append((logp, seq, True))
+                    continue
+                ys = torch.tensor([seq], dtype=torch.long, device=device)
+                tgt_mask = make_tgt_mask(ys, PAD_IDX)
+                logits = self.decode(memory, src_mask, ys, tgt_mask)
+                log_probs = torch.log_softmax(logits[0, -1, :], dim=-1)
+                top_lp, top_ix = log_probs.topk(beam_size)   # best next tokens
+                for lp, ix in zip(top_lp.tolist(), top_ix.tolist()):
+                    candidates.append((logp + lp, seq + [ix], ix == EOS_IDX))
+
+            # Keep the beam_size best candidates by length-normalized score.
+            candidates.sort(key=lambda c: c[0] / max(len(c[1]), 1), reverse=True)
+            beams = candidates[:beam_size]
+
+        # 5) best beam -> sentence (length-normalized to avoid short-bias).
+        best = max(beams, key=lambda c: c[0] / max(len(c[1]), 1))
+        return self._ids_to_sentence(best[1])
+
+    @torch.no_grad()
+    def _greedy_infer(self, memory, src_mask, max_decode, device) -> str:
+        """Plain greedy decode — used as the time-budget fallback for infer()."""
         ys = torch.tensor([[SOS_IDX]], dtype=torch.long, device=device)
         for _ in range(max_decode - 1):
             tgt_mask = make_tgt_mask(ys, PAD_IDX)
-            logits   = self.decode(memory, src_mask, ys, tgt_mask)   # [1, cur, vocab]
-            next_tok = logits[:, -1, :].argmax(dim=-1, keepdim=True) # greedy pick
+            logits   = self.decode(memory, src_mask, ys, tgt_mask)
+            next_tok = logits[:, -1, :].argmax(dim=-1, keepdim=True)
             ys = torch.cat([ys, next_tok], dim=1)
-            if next_tok.item() == EOS_IDX:            # stop as soon as <eos> is emitted
+            if next_tok.item() == EOS_IDX:
                 break
-
-        # 5) indices -> English words, drop special tokens.
-        words = []
-        for idx in ys.squeeze(0).tolist():
-            if idx in (SOS_IDX, PAD_IDX):
-                continue
-            if idx == EOS_IDX:
-                break
-            words.append(self.tgt_itos[idx] if idx < len(self.tgt_itos) else "<unk>")
-
-        # 6) detokenize into a clean sentence.
-        return " ".join(words).strip()
+        return self._ids_to_sentence(ys.squeeze(0).tolist())
 
 
 # ══════════════════════════════════════════════════════════════════════

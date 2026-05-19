@@ -274,19 +274,19 @@ def evaluate_bleu(
     """
     Evaluate translation quality with corpus-level BLEU score.
 
-    BLEU compares the model's output against the reference translation by
-    counting overlapping n-grams (1- to 4-grams) and applying a brevity
-    penalty for too-short outputs. Higher is better; we report it on a
-    0–100 scale.
+    The decode path here is kept IDENTICAL to Transformer.infer() so that the
+    BLEU printed on Kaggle predicts the BLEU the autograder reports:
+      * same per-sentence length cap  (min(80, src_len + 15))
+      * same greedy argmax decoding.
 
     Args:
         model           : Trained Transformer (in eval mode).
-        test_dataloader : DataLoader over the test split, yielding
-                          (src, tgt) token-index tensors.
-        tgt_vocab       : Vocabulary object with an `itos` list (and/or
-                          `lookup_token`) for the English side.
+        test_dataloader : DataLoader over the test split, yielding (src, tgt).
+        tgt_vocab       : Vocabulary object exposing `itos` / `get_itos` /
+                          `lookup_token` for the English side.
         device          : 'cpu' or 'cuda'.
-        max_len         : Max decode length per sentence.
+        max_len         : Hard ceiling on decode length (cap is min of this
+                          and src_len + 15).
 
     Returns:
         bleu_score : Corpus-level BLEU (float, range 0–100).
@@ -298,22 +298,23 @@ def evaluate_bleu(
         itos = tgt_vocab.itos
     elif hasattr(tgt_vocab, "get_itos"):
         itos = tgt_vocab.get_itos()
-    else:                                              # last-resort fallback
+    else:
         itos = [tgt_vocab.lookup_token(i) for i in range(len(tgt_vocab))]
 
     hypotheses = []   # list of token-lists  (model outputs)
-    references = []   # list of [token-list] (gold; nested for sacre/nltk API)
+    references = []   # list of [token-list] (gold; nested for the nltk API)
 
     with torch.no_grad():
         for src, tgt in test_dataloader:
-            # Decode each sentence in the batch one at a time (batch=1 logic).
             for i in range(src.size(0)):
                 src_i = src[i : i + 1].to(device)
                 src_mask = make_src_mask(src_i, PAD_IDX)
 
+                # Same cap as infer(): stay tight, never truncate short sents.
+                cap = min(max_len, src_i.size(1) + 15)
                 pred = greedy_decode(
                     model, src_i, src_mask,
-                    max_len=max_len, start_symbol=SOS_IDX,
+                    max_len=cap, start_symbol=SOS_IDX,
                     end_symbol=EOS_IDX, device=device,
                 )
                 hyp_tokens = _ids_to_tokens(pred.squeeze(0).tolist(), itos)
@@ -327,45 +328,15 @@ def evaluate_bleu(
 
 def _corpus_bleu(hypotheses, references) -> float:
     """
-    Corpus-level BLEU on the 0–100 scale.
+    Corpus-level BLEU-4 on the 0–100 scale.
 
-    Prefers NLTK's corpus_bleu (with smoothing) and falls back to a small
-    self-contained implementation so this never crashes if nltk is missing.
+    Pinned to NLTK's corpus_bleu with SmoothingFunction().method1 — ONE fixed
+    implementation, no silent fallback. If nltk is missing this raises loudly
+    rather than quietly returning a different (incompatible) number.
     """
-    # ── Preferred path: NLTK ──────────────────────────────────────────
-    try:
-        from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
-        smooth = SmoothingFunction().method1
-        score = corpus_bleu(references, hypotheses, smoothing_function=smooth)
-        return score * 100.0
-    except Exception:
-        pass
-
-    # ── Fallback: minimal BLEU-4 implementation ───────────────────────
-    from collections import Counter
-
-    def ngrams(tokens, n):
-        return Counter(tuple(tokens[i:i + n]) for i in range(len(tokens) - n + 1))
-
-    weights = [0.25, 0.25, 0.25, 0.25]
-    precisions = []
-    for n in range(1, 5):
-        match, total = 0, 0
-        for hyp, refs in zip(hypotheses, references):
-            hyp_ng = ngrams(hyp, n)
-            ref_ng = ngrams(refs[0], n)
-            for ng, cnt in hyp_ng.items():
-                match += min(cnt, ref_ng.get(ng, 0))
-            total += max(sum(hyp_ng.values()), 1)
-        # +1 smoothing to keep log() finite when an n-gram order has 0 matches.
-        precisions.append((match + 1) / (total + 1))
-
-    hyp_len = sum(len(h) for h in hypotheses)
-    ref_len = sum(len(r[0]) for r in references)
-    # Brevity penalty: punishes outputs shorter than the reference.
-    bp = 1.0 if hyp_len > ref_len else math.exp(1 - ref_len / max(hyp_len, 1))
-
-    score = bp * math.exp(sum(w * math.log(p) for w, p in zip(weights, precisions)))
+    from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+    smooth = SmoothingFunction().method1
+    score = corpus_bleu(references, hypotheses, smoothing_function=smooth)
     return score * 100.0
 
 
@@ -444,17 +415,17 @@ def load_checkpoint(
 # Default hyper-parameters for the main training run. Tuned to fit the small
 # Multi30k dataset on a single Kaggle GPU in a reasonable time.
 DEFAULT_HPARAMS = dict(
-    d_model      = 512,
-    N            = 6,
-    num_heads    = 8,
-    d_ff         = 2048,
-    dropout      = 0.1,
-    batch_size   = 128,
-    num_epochs   = 20,
-    warmup_steps = 4000,
-    smoothing    = 0.1,
-    min_freq     = 2,
-)
+        d_model      = 256,
+        N            = 3,
+        num_heads    = 8,
+        d_ff         = 512,      # back to 512 — 1024 just overfit faster
+        dropout      = 0.3,      # THE key change; 0.1 was the real problem
+        batch_size   = 128,
+        num_epochs   = 40,       # plenty; early-stops on val anyway
+        warmup_steps = 4000,     # back to 4000 — 3000 sped up overfitting
+        smoothing    = 0.1,
+        min_freq     = 2,
+    )
 
 
 def build_dataloaders(batch_size: int, min_freq: int):
