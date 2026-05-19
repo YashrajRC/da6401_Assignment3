@@ -1,24 +1,24 @@
 """
-Noam Learning Rate Scheduler
+lr_scheduler.py — Noam Learning Rate Scheduler
 Reference: "Attention Is All You Need" (Vaswani et al., 2017)
            https://arxiv.org/abs/1706.03762
 
 Formula:
     lrate = d_model^(-0.5) * min(step^(-0.5), step * warmup_steps^(-1.5))
 
-WHY does the Transformer need this special schedule?
------------------------------------------------------
-A Transformer trained with a *constant* learning rate from step 0 tends to
-diverge: at the start the attention weights are essentially random, the
-softmax produces near-uniform distributions, and the resulting gradients are
-both large and noisy. A big LR on those noisy gradients pushes the weights
-into a bad region the model never recovers from.
+WHY the Transformer needs this schedule
+----------------------------------------
+With a constant LR from step 0, the early attention weights are essentially
+random, producing near-uniform softmax outputs and noisy gradients. A large
+LR applied to those gradients pushes weights into a bad basin the model
+never escapes. The Noam schedule has two phases:
 
-The Noam schedule fixes this with two phases:
-  * WARM-UP  (step < warmup_steps): LR rises *linearly* from ~0. Tiny early
-    steps let the attention layers settle before any big update is applied.
-  * DECAY    (step > warmup_steps): LR falls like 1/sqrt(step), taking
-    smaller and smaller steps as the model approaches a good minimum.
+  WARM-UP  (step <= warmup_steps): LR rises linearly from ~0.
+    - Keeps updates tiny while the attention layers find a reasonable
+      initial direction, preventing early divergence in the softmax layers.
+
+  DECAY    (step >  warmup_steps): LR falls ∝ 1/√step.
+    - Progressively smaller steps as the model approaches convergence.
 
 The peak LR occurs exactly at step == warmup_steps.
 """
@@ -28,23 +28,15 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import LRScheduler
 
 
-# ─────────────────────────────────────────────
-#  NoamScheduler
-# ─────────────────────────────────────────────
-
 class NoamScheduler(LRScheduler):
     """
     Noam learning rate scheduler as described in "Attention Is All You Need".
 
-    Applies a warm-up phase where LR increases linearly, followed by
-    a decay phase where LR decreases proportional to the inverse square
-    root of the step number.
-
     Args:
-        optimizer (torch.optim.Optimizer): Wrapped optimizer.
-        d_model          (int)  : Model dimensionality (embedding size).
-        warmup_steps     (int)  : Number of warm-up steps before decay begins.
-        last_epoch       (int)  : The index of the last epoch. Default: -1.
+        optimizer    (Optimizer): Wrapped optimizer.
+        d_model      (int)      : Model dimensionality (embedding size).
+        warmup_steps (int)      : Steps before LR starts decaying.
+        last_epoch   (int)      : Index of the last epoch (default -1).
     """
 
     def __init__(
@@ -54,86 +46,50 @@ class NoamScheduler(LRScheduler):
         warmup_steps: int,
         last_epoch: int = -1,
     ) -> None:
-        # Store our two hyper-parameters BEFORE calling super().__init__,
-        # because the parent constructor immediately calls get_lr(), which
-        # in turn needs self.d_model and self.warmup_steps to exist.
+        # Store BEFORE super().__init__ because the parent constructor
+        # calls get_lr() immediately, which needs these attributes.
         self.d_model = d_model
         self.warmup_steps = warmup_steps
         super().__init__(optimizer, last_epoch)
 
-    # ------------------------------------------------------------------
     def _get_lr_scale(self) -> float:
         """
-        Compute the Noam scaling factor for the current step.
+        Noam scaling factor for the current step.
 
-        Returns:
-            float: The scalar multiplier applied to the base learning rate.
+        step = last_epoch + 1  (avoids step=0 where step^-0.5 is undefined).
+        scale = d_model^(-0.5) * min(step^(-0.5), step * warmup_steps^(-1.5))
         """
-        # PyTorch's scheduler counts steps in `last_epoch`. It starts at 0,
-        # so we use step = last_epoch + 1 to make the first real step be 1
-        # (the formula has step^(-0.5), which is undefined at step 0).
-        step = self.last_epoch + 1
+        step  = self.last_epoch + 1
+        term_a = step ** (-0.5)                         # decay phase
+        term_b = step * (self.warmup_steps ** (-1.5))   # warm-up phase
+        return (self.d_model ** (-0.5)) * min(term_a, term_b)
 
-        # Noam formula, split for readability:
-        #   term_a = step^(-0.5)                  -> dominates AFTER warm-up
-        #   term_b = step * warmup_steps^(-1.5)   -> dominates DURING warm-up
-        term_a = step ** (-0.5)
-        term_b = step * (self.warmup_steps ** (-1.5))
-
-        scale = (self.d_model ** (-0.5)) * min(term_a, term_b)
-        return scale
-
-    # ------------------------------------------------------------------
-    def get_lr(self) -> list[float]:
-        """
-        Compute learning rates for every param group.
-
-        Called internally by PyTorch's scheduler machinery each step.
-
-        Returns:
-            list[float]: New learning rate for each param group.
-        """
+    def get_lr(self) -> list:
+        """Return new LR for each param group (called by PyTorch internally)."""
         scale = self._get_lr_scale()
-        # base_lrs holds the LR each param group was created with.
-        # The effective LR is base_lr * Noam_scale.
         return [base_lr * scale for base_lr in self.base_lrs]
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Helper — do NOT modify
+# Helper — do NOT modify (used by autograder tests)
 # ──────────────────────────────────────────────────────────────────────
 
-def get_lr_history(
-    d_model: int,
-    warmup_steps: int,
-    total_steps: int,
-) -> list[float]:
-    """
-    Simulate the LR trajectory of NoamScheduler for `total_steps` steps.
-
-    Args:
-        d_model      (int): Model dimensionality.
-        warmup_steps (int): Warm-up steps.
-        total_steps  (int): Number of steps to simulate.
-
-    Returns:
-        list[float]: LR value at each step (length == total_steps).
-    """
-    dummy_model = torch.nn.Linear(1, 1)
-    optimizer   = optim.Adam(dummy_model.parameters(), lr=1.0)
-    scheduler   = NoamScheduler(optimizer, d_model=d_model, warmup_steps=warmup_steps)
+def get_lr_history(d_model: int, warmup_steps: int, total_steps: int) -> list:
+    """Simulate the LR trajectory for total_steps steps."""
+    dummy = torch.nn.Linear(1, 1)
+    opt   = optim.Adam(dummy.parameters(), lr=1.0)
+    sched = NoamScheduler(opt, d_model=d_model, warmup_steps=warmup_steps)
 
     history = []
     for _ in range(total_steps):
-        history.append(optimizer.param_groups[0]["lr"])
-        optimizer.step()
-        scheduler.step()
-
+        history.append(opt.param_groups[0]["lr"])
+        opt.step()
+        sched.step()
     return history
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Quick visual check — run:  python lr_scheduler.py
+# Quick visual check:  python lr_scheduler.py
 # ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -147,7 +103,8 @@ if __name__ == "__main__":
 
     plt.figure(figsize=(9, 4))
     plt.plot(lrs)
-    plt.axvline(WARMUP_STEPS, color="red", linestyle="--", label=f"warmup={WARMUP_STEPS}")
+    plt.axvline(WARMUP_STEPS, color="red", linestyle="--",
+                label=f"warmup={WARMUP_STEPS}")
     plt.xlabel("Step")
     plt.ylabel("Learning Rate")
     plt.title(f"Noam LR Schedule  (d_model={D_MODEL})")
