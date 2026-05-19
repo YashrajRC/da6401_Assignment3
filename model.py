@@ -62,8 +62,8 @@ DEFAULT_MAX_LEN   = 150
 PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX = 1, 0, 2, 3
 
 # ── Replace with your own Google Drive file IDs after uploading ──────
-GDRIVE_WEIGHTS_ID = "YOUR_WEIGHTS_FILE_ID"   # checkpoint .pth
-GDRIVE_VOCAB_ID   = "YOUR_VOCAB_FILE_ID"     # vocab.pkl
+GDRIVE_WEIGHTS_ID = "1MKpa-kFlD1_SL4fM-6nj7hM8D_LAJYrK"   # checkpoint .pth
+GDRIVE_VOCAB_ID   = "10gRX-7r3Ktc-bUaXveCiuQtpfdjrEfzW"     # vocab.pkl
 
 
 # ══════════════════════════════════════════════════════════════════════
