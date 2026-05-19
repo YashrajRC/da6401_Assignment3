@@ -14,14 +14,9 @@ except Exception:
     gdown = None
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  GLOBAL DEFAULTS
-#  — Must match the architecture of the checkpoint on Google Drive.
-#  — After training on Kaggle, update these to your actual vocab sizes.
-# ══════════════════════════════════════════════════════════════════════
 
-DEFAULT_SRC_VOCAB_SIZE = 7853   # German  (printed by train.py on Kaggle)
-DEFAULT_TGT_VOCAB_SIZE = 5893   # English (printed by train.py on Kaggle)
+DEFAULT_SRC_VOCAB_SIZE = 7853   
+DEFAULT_TGT_VOCAB_SIZE = 5893   
 
 DEFAULT_D_MODEL   = 256
 DEFAULT_N         = 3
@@ -32,14 +27,9 @@ DEFAULT_MAX_LEN   = 150
 
 PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX = 1, 0, 2, 3
 
-# ── Replace with your own Google Drive file IDs after uploading ──────
 GDRIVE_WEIGHTS_ID = "1MKpa-kFlD1_SL4fM-6nj7hM8D_LAJYrK"   # checkpoint .pth
 GDRIVE_VOCAB_ID   = "10gRX-7r3Ktc-bUaXveCiuQtpfdjrEfzW"     # vocab.pkl
 
-
-# ══════════════════════════════════════════════════════════════════════
-# ❶  SCALED DOT-PRODUCT ATTENTION
-# ══════════════════════════════════════════════════════════════════════
 
 def scaled_dot_product_attention(
     Q: torch.Tensor,
@@ -58,9 +48,6 @@ def scaled_dot_product_attention(
     return output, attn_w
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❷  MASK HELPERS
-# ══════════════════════════════════════════════════════════════════════
 
 def make_src_mask(src: torch.Tensor, pad_idx: int = PAD_IDX) -> torch.Tensor:
     return (src == pad_idx).unsqueeze(1).unsqueeze(2)
@@ -71,15 +58,15 @@ def make_tgt_mask(tgt: torch.Tensor, pad_idx: int = PAD_IDX) -> torch.Tensor:
     device = tgt.device
 
     # Positions whose KEY token is a pad.
-    pad_mask = (tgt == pad_idx).unsqueeze(1).unsqueeze(2)        # [B,1,1,T]
+    pad_mask = (tgt == pad_idx).unsqueeze(1).unsqueeze(2)      
 
     # Upper-triangular = future positions (causal mask).
     causal = torch.triu(
         torch.ones(tgt_len, tgt_len, device=device, dtype=torch.bool),
         diagonal=1,
-    ).unsqueeze(0).unsqueeze(1)                                   # [1,1,T,T]
+    ).unsqueeze(0).unsqueeze(1)                                  
 
-    return pad_mask | causal                                      # [B,1,T,T]
+    return pad_mask | causal                                     
 
 
 
@@ -98,7 +85,7 @@ class MultiHeadAttention(nn.Module):
         self.w_o = nn.Linear(d_model, d_model, bias=False)
 
         self.dropout = nn.Dropout(p=dropout)
-        self.attn_weights: Optional[torch.Tensor] = None   # for W&B visualisation
+        self.attn_weights: Optional[torch.Tensor] = None   
 
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         B, S, _ = x.shape

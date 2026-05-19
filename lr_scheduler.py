@@ -28,10 +28,6 @@ class NoamScheduler(LRScheduler):
         return [base_lr * scale for base_lr in self.base_lrs]
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Helper — do NOT modify (used by autograder tests)
-# ──────────────────────────────────────────────────────────────────────
-
 def get_lr_history(d_model: int, warmup_steps: int, total_steps: int) -> list:
     dummy = torch.nn.Linear(1, 1)
     opt   = optim.Adam(dummy.parameters(), lr=1.0)

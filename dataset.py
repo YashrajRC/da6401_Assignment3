@@ -5,7 +5,6 @@ from typing import List, Dict, Tuple
 import torch
 from torch.utils.data import Dataset
 
-# Special tokens — keep IDs identical to model.py
 UNK, PAD, SOS, EOS = "<unk>", "<pad>", "<sos>", "<eos>"
 UNK_IDX, PAD_IDX, SOS_IDX, EOS_IDX = 0, 1, 2, 3
 SPECIALS = [UNK, PAD, SOS, EOS]
@@ -79,13 +78,11 @@ class Multi30kDataset(Dataset):
     ) -> None:
         self.split = split
 
-        # ── Tokenizers ────────────────────────────────────────────────
         if de_tokenizer is None or en_tokenizer is None:
             de_tokenizer, en_tokenizer = get_tokenizers()
         self.de_tokenizer = de_tokenizer
         self.en_tokenizer = en_tokenizer
 
-        # ── Raw text from HuggingFace ─────────────────────────────────
         from datasets import load_dataset
         hf_split = {"val": "validation"}.get(split, split)
         raw = load_dataset(self.HF_DATASET, split=hf_split)
@@ -93,7 +90,6 @@ class Multi30kDataset(Dataset):
         self.src_tokens = [self.de_tokenizer(row["de"]) for row in raw]
         self.tgt_tokens = [self.en_tokenizer(row["en"]) for row in raw]
 
-        # ── Vocabulary ────────────────────────────────────────────────
         if src_vocab is None or tgt_vocab is None:
             assert split == "train", \
                 "Vocab must be built from the train split and reused elsewhere."
@@ -103,7 +99,6 @@ class Multi30kDataset(Dataset):
             self.src_vocab = src_vocab
             self.tgt_vocab = tgt_vocab
 
-        # ── Tokens -> index tensors ───────────────────────────────────
         self.src_data, self.tgt_data = self._process_data()
 
     @staticmethod
@@ -147,9 +142,6 @@ class Multi30kDataset(Dataset):
               f"(src={len(self.src_vocab)}, tgt={len(self.tgt_vocab)})")
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  COLLATE (pads variable-length sequences into a rectangular batch)
-# ══════════════════════════════════════════════════════════════════════
 
 def collate_batch(batch):
     from torch.nn.utils.rnn import pad_sequence
@@ -159,9 +151,6 @@ def collate_batch(batch):
     return src_padded, tgt_padded
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  QUICK SELF-TEST
-# ══════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     train = Multi30kDataset(split="train")

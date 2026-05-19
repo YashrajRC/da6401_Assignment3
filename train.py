@@ -29,14 +29,12 @@ class LabelSmoothingLoss(nn.Module):
     def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         log_probs = torch.log_softmax(logits, dim=-1)
 
-        # Build smoothed target: start with uniform ε / (V-2) everywhere.
         smooth = torch.full_like(log_probs, self.smoothing / (self.vocab_size - 2))
-        # Put (1-ε) on the gold token of each row.
+
         smooth.scatter_(1, target.unsqueeze(1), self.confidence)
-        # <pad> column always gets zero probability.
+   
         smooth[:, self.pad_idx] = 0.0
 
-        # Zero out rows where the gold token is <pad> (pure padding).
         pad_rows = (target == self.pad_idx)
         if pad_rows.any():
             smooth.index_fill_(0, pad_rows.nonzero(as_tuple=False).squeeze(1), 0.0)
@@ -84,7 +82,6 @@ def run_epoch(
             if is_train:
                 optimizer.zero_grad()
                 loss.backward()
-                # Gradient clipping: prevents occasional exploding gradients.
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 if scheduler is not None:
@@ -99,9 +96,6 @@ def run_epoch(
     return total_loss / max(total_tokens, 1)
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❸  GREEDY DECODING
-# ══════════════════════════════════════════════════════════════════════
 
 def greedy_decode(
     model: Transformer,
@@ -134,9 +128,6 @@ def greedy_decode(
     return ys
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❹  BLEU EVALUATION
-# ══════════════════════════════════════════════════════════════════════
 
 def _ids_to_tokens(ids, itos):
     words = []
@@ -225,9 +216,6 @@ def _corpus_bleu(hypotheses, references) -> float:
     return score * 100.0
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❺  CHECKPOINT UTILITIES
-# ══════════════════════════════════════════════════════════════════════
 
 def save_checkpoint(
     model: Transformer,
@@ -266,9 +254,6 @@ def load_checkpoint(
     return ckpt.get("epoch", 0)
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❻  TRAINING HELPERS
-# ══════════════════════════════════════════════════════════════════════
 
 def compute_token_accuracy(model: Transformer, loader, device: str) -> float:
     model.eval()
@@ -309,12 +294,12 @@ DEFAULT_HPARAMS = dict(
     num_heads    = 8,
     d_ff         = 512,
     dropout      = 0.1,
-    batch_size   = 64,       # smaller batches → implicit regularisation
+    batch_size   = 64,      
     num_epochs   = 50,
     warmup_steps = 4000,
     smoothing    = 0.1,
     min_freq     = 2,
-    patience     = 10,       # early-stopping patience (epochs without improvement)
+    patience     = 10,      
 )
 
 
@@ -416,7 +401,7 @@ def run_training_experiment(
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Trainable parameters: {n_params:,}")
 
-    # Section 2.2 ablation
+    
     if not use_scaling:
         _disable_attention_scaling()
 
@@ -429,7 +414,6 @@ def run_training_experiment(
             optimizer, d_model=hp["d_model"], warmup_steps=hp["warmup_steps"]
         )
     else:
-        # Fixed-LR baseline for §2.1
         for g in optimizer.param_groups:
             g["lr"] = 1e-4
         scheduler = None
@@ -475,7 +459,6 @@ def run_training_experiment(
                       f"(no improvement for {hp['patience']} epochs)")
                 break
 
-        # Always keep a rolling checkpoint too
         save_checkpoint(model, optimizer, scheduler, epoch, "checkpoint.pth")
 
     print("\nLoading best checkpoint for final evaluation …")
