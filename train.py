@@ -1,31 +1,3 @@
-"""
-train.py — Training Pipeline, Inference & Evaluation
-DA6401 Assignment 3: "Attention Is All You Need"
-
-AUTOGRADER CONTRACT (DO NOT MODIFY SIGNATURES):
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │  greedy_decode(model, src, src_mask, max_len, start_symbol)         │
-  │      → torch.Tensor  shape [1, out_len]  (token indices)            │
-  │                                                                     │
-  │  evaluate_bleu(model, test_dataloader, tgt_vocab, device)           │
-  │      → float  (corpus-level BLEU score, 0–100)                      │
-  │                                                                     │
-  │  save_checkpoint(model, optimizer, scheduler, epoch, path) → None   │
-  │  load_checkpoint(path, model, optimizer, scheduler)        → int    │
-  └─────────────────────────────────────────────────────────────────────┘
-
-Training strategy (informed by ablation experiments)
-----------------------------------------------------
-* Architecture: d_model=256, N=3, num_heads=8, d_ff=512
-  - The full paper-size model (512/6) overfits badly on Multi30k's 29k
-    training pairs. Halving depth and width cuts val loss dramatically.
-* Optimizer: Adam (β1=0.9, β2=0.98, ε=1e-9) + Noam scheduler
-* Label smoothing ε=0.1 (as in the paper)
-* batch_size=64 (smaller batches → implicit regularisation → better BLEU)
-* Early stopping with patience=10 (prevents overfitting to epoch count)
-* Weight tying between target embedding and output projection
-"""
-
 import math
 import os
 from typing import Optional
@@ -42,28 +14,8 @@ from dataset import (
 from lr_scheduler import NoamScheduler
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❶  LABEL SMOOTHING LOSS  (§5.4, ε_ls = 0.1)
-# ══════════════════════════════════════════════════════════════════════
 
 class LabelSmoothingLoss(nn.Module):
-    """
-    Label smoothing as in "Attention Is All You Need".
-
-    Plain cross-entropy pushes the correct-word probability → 1 and all
-    others → 0, making the model over-confident and hurting calibration
-    / generalisation on a task where many outputs are acceptable.
-
-    Smoothed distribution:
-        y[gold]   = 1 - ε
-        y[others] = ε / (vocab_size - 2)   (excluding gold and <pad>)
-        y[pad]    = 0                        (<pad> never contributes)
-
-    Args:
-        vocab_size (int)  : Output vocab size.
-        pad_idx    (int)  : <pad> index (always 0 probability).
-        smoothing  (float): ε (default 0.1).
-    """
 
     def __init__(self, vocab_size: int, pad_idx: int, smoothing: float = 0.1) -> None:
         super().__init__()
@@ -75,13 +27,6 @@ class LabelSmoothingLoss(nn.Module):
         self.criterion  = nn.KLDivLoss(reduction="batchmean")
 
     def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            logits : [batch * tgt_len, vocab_size]  raw model output
-            target : [batch * tgt_len]              gold token indices
-        Returns:
-            Scalar loss.
-        """
         log_probs = torch.log_softmax(logits, dim=-1)
 
         # Build smoothed target: start with uniform ε / (V-2) everywhere.
@@ -99,9 +44,7 @@ class LabelSmoothingLoss(nn.Module):
         return self.criterion(log_probs, smooth)
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❷  TRAINING / EVALUATION LOOP
-# ══════════════════════════════════════════════════════════════════════
+
 
 def run_epoch(
     data_iter,
@@ -114,16 +57,6 @@ def run_epoch(
     device: str = "cpu",
     grad_log_callback=None,
 ) -> float:
-    """
-    Run one epoch of training or evaluation.
-
-    Teacher forcing: the decoder sees the GOLD previous tokens.
-        tgt_input  = tgt[:, :-1]   (decoder input,  drops <eos>)
-        tgt_output = tgt[:, 1:]    (prediction target, drops <sos>)
-
-    Returns:
-        avg_loss : token-weighted average loss over the epoch.
-    """
     model.train() if is_train else model.eval()
 
     total_loss   = 0.0
@@ -179,21 +112,6 @@ def greedy_decode(
     end_symbol: int = EOS_IDX,
     device: str = "cpu",
 ) -> torch.Tensor:
-    """
-    Token-by-token greedy decoding (argmax at each step).
-
-    Args:
-        model        : Trained Transformer.
-        src          : [1, src_len] source token indices.
-        src_mask     : [1, 1, 1, src_len].
-        max_len      : Max tokens to generate.
-        start_symbol : <sos> index.
-        end_symbol   : <eos> index.
-        device       : 'cpu' or 'cuda'.
-
-    Returns:
-        ys : [1, out_len] token indices, starting with start_symbol.
-    """
     model.eval()
     src      = src.to(device)
     src_mask = src_mask.to(device)
@@ -221,7 +139,6 @@ def greedy_decode(
 # ══════════════════════════════════════════════════════════════════════
 
 def _ids_to_tokens(ids, itos):
-    """Map index list to words, dropping special tokens."""
     words = []
     for idx in ids:
         if idx in (SOS_IDX, PAD_IDX):
@@ -239,19 +156,6 @@ def evaluate_bleu(
     device: str = "cpu",
     max_len: int = 150,
 ) -> float:
-    """
-    Corpus-level BLEU score on the test set.
-
-    Args:
-        model           : Trained Transformer (eval mode).
-        test_dataloader : DataLoader yielding (src, tgt) batches.
-        tgt_vocab       : Vocab object with .itos or .get_itos().
-        device          : 'cpu' or 'cuda'.
-        max_len         : Max decode length.
-
-    Returns:
-        BLEU score in range 0–100.
-    """
     model.eval()
 
     if hasattr(tgt_vocab, "itos"):
@@ -287,11 +191,7 @@ def evaluate_bleu(
 
 
 def _corpus_bleu(hypotheses, references) -> float:
-    """
-    Corpus BLEU on 0–100 scale.
-    Uses NLTK if available; falls back to a self-contained BLEU-4 impl.
-    """
-    # ── NLTK path ─────────────────────────────────────────────────────
+   
     try:
         from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
         score = corpus_bleu(
@@ -301,8 +201,6 @@ def _corpus_bleu(hypotheses, references) -> float:
         return score * 100.0
     except Exception:
         pass
-
-    # ── Fallback BLEU-4 ───────────────────────────────────────────────
     from collections import Counter
 
     def ngrams(tokens, n):
@@ -338,11 +236,6 @@ def save_checkpoint(
     epoch: int,
     path: str = "checkpoint.pth",
 ) -> None:
-    """
-    Save model + optimizer + scheduler state.
-    Saved dict keys: epoch, model_state_dict, optimizer_state_dict,
-                     scheduler_state_dict, model_config
-    """
     torch.save(
         {
             "epoch":                epoch,
@@ -362,10 +255,6 @@ def load_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler=None,
 ) -> int:
-    """
-    Restore model (and optionally optimizer/scheduler) from checkpoint.
-    Returns the epoch number stored in the checkpoint.
-    """
     ckpt = torch.load(path, map_location="cpu")
     model.load_state_dict(ckpt["model_state_dict"])
 
@@ -382,7 +271,6 @@ def load_checkpoint(
 # ══════════════════════════════════════════════════════════════════════
 
 def compute_token_accuracy(model: Transformer, loader, device: str) -> float:
-    """Next-token prediction accuracy (ignores <pad> targets)."""
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
@@ -402,9 +290,6 @@ def compute_token_accuracy(model: Transformer, loader, device: str) -> float:
 
 
 def _disable_attention_scaling():
-    """
-    Section 2.2 ablation: remove the 1/√dk scaling to show it matters.
-    """
     import model as _m
 
     def _unscaled(Q, K, V, mask=None):
@@ -418,13 +303,6 @@ def _disable_attention_scaling():
     print("[ablation] √dk scaling DISABLED")
 
 
-# ══════════════════════════════════════════════════════════════════════
-# ❼  EXPERIMENT ENTRY POINT
-# ══════════════════════════════════════════════════════════════════════
-
-# Best hyperparameters found from ablation experiments:
-#   Full paper-size (512/6) → massive overfitting on 29k pairs → BLEU ~20
-#   256/3/512, dropout=0.1, batch=64, 50 epochs → best generalisation
 DEFAULT_HPARAMS = dict(
     d_model      = 256,
     N            = 3,
@@ -441,7 +319,6 @@ DEFAULT_HPARAMS = dict(
 
 
 def build_dataloaders(batch_size: int, min_freq: int):
-    """Build train/val/test DataLoaders, building vocab from train only."""
     train_ds = Multi30kDataset(split="train", min_freq=min_freq)
     val_ds   = Multi30kDataset(
         split="validation",
@@ -475,12 +352,6 @@ def run_training_experiment(
     smoothing_override: float = None,        # override ε_ls  (§2.5)
     run_name: str            = "main",
 ) -> dict:
-    """
-    Build data, model, optimiser, scheduler, run the training loop, evaluate.
-
-    All W&B ablations are driven from here by passing different flags.
-    Returns a dict with final metrics.
-    """
     hp = dict(DEFAULT_HPARAMS)
     if hparams:
         hp.update(hparams)
@@ -494,7 +365,6 @@ def run_training_experiment(
     print(f"  Hparams    : {hp}")
     print(f"{'='*60}\n")
 
-    # ── 1) W&B ────────────────────────────────────────────────────────
     wandb = None
     if use_wandb:
         try:
@@ -512,7 +382,6 @@ def run_training_experiment(
             print(f"[wandb] disabled ({e})")
             wandb = None
 
-    # ── 2) Data ───────────────────────────────────────────────────────
     (train_ds, val_ds, test_ds,
      train_loader, val_loader, test_loader) = build_dataloaders(
         hp["batch_size"], hp["min_freq"]
@@ -525,7 +394,6 @@ def run_training_experiment(
     # Save vocab bundle for infer()
     train_ds.export_vocab_bundle("vocab.pkl")
 
-    # ── 3) Model (fresh weights, no Drive download during training) ───
     model = Transformer(
         src_vocab_size = src_vocab_size,
         tgt_vocab_size = tgt_vocab_size,
@@ -538,7 +406,6 @@ def run_training_experiment(
         load_pretrained= False,
     ).to(device)
 
-    # Attach vocab so infer() works for spot-checks during training
     model.attach_vocab(
         train_ds.src_vocab.stoi,
         train_ds.tgt_vocab.stoi,
@@ -553,12 +420,10 @@ def run_training_experiment(
     if not use_scaling:
         _disable_attention_scaling()
 
-    # ── 4) Optimizer (paper betas) ────────────────────────────────────
     optimizer = torch.optim.Adam(
         model.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9
     )
 
-    # ── 5) Scheduler ──────────────────────────────────────────────────
     if scheduler_type == "noam":
         scheduler = NoamScheduler(
             optimizer, d_model=hp["d_model"], warmup_steps=hp["warmup_steps"]
@@ -569,10 +434,8 @@ def run_training_experiment(
             g["lr"] = 1e-4
         scheduler = None
 
-    # ── 6) Loss ───────────────────────────────────────────────────────
     loss_fn = LabelSmoothingLoss(tgt_vocab_size, PAD_IDX, smoothing=hp["smoothing"])
 
-    # ── 7) Training loop with early stopping ─────────────────────────
     best_val   = float("inf")
     no_improve = 0
 
@@ -615,7 +478,6 @@ def run_training_experiment(
         # Always keep a rolling checkpoint too
         save_checkpoint(model, optimizer, scheduler, epoch, "checkpoint.pth")
 
-    # ── 8) Final test-set BLEU (use best checkpoint) ──────────────────
     print("\nLoading best checkpoint for final evaluation …")
     load_checkpoint("best_checkpoint.pth", model)
     bleu = evaluate_bleu(model, test_loader, train_ds.tgt_vocab, device=device)
@@ -635,7 +497,6 @@ def run_training_experiment(
 
 
 def main():
-    """Simple entry point (no W&B)."""
     run_training_experiment(use_wandb=False, run_name="main")
 
 

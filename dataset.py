@@ -1,14 +1,3 @@
-"""
-dataset.py — Multi30k loading, tokenization, vocab building
-DA6401 Assignment 3: "Attention Is All You Need"
-
-Special tokens (indices MUST match model.py):
-    <unk> = 0   unknown / out-of-vocabulary word
-    <pad> = 1   padding to make all sequences in a batch equal length
-    <sos> = 2   start-of-sentence marker
-    <eos> = 3   end-of-sentence marker
-"""
-
 import pickle
 from collections import Counter
 from typing import List, Dict, Tuple
@@ -22,15 +11,7 @@ UNK_IDX, PAD_IDX, SOS_IDX, EOS_IDX = 0, 1, 2, 3
 SPECIALS = [UNK, PAD, SOS, EOS]
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  VOCABULARY
-# ══════════════════════════════════════════════════════════════════════
-
 class Vocab:
-    """
-    Minimal vocabulary: stoi (word -> idx) and itos (idx -> word).
-    Plain picklable object for shipping to autograder via gdown.
-    """
 
     def __init__(self, stoi: Dict[str, int], itos: List[str]) -> None:
         self.stoi = stoi
@@ -53,7 +34,6 @@ class Vocab:
 
 
 def build_vocab_from_counter(counter: Counter, min_freq: int = 2) -> Vocab:
-    """Build Vocab from a frequency Counter; specials always at 0–3."""
     itos = list(SPECIALS)
     for word, freq in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])):
         if freq >= min_freq and word not in SPECIALS:
@@ -62,15 +42,8 @@ def build_vocab_from_counter(counter: Counter, min_freq: int = 2) -> Vocab:
     return Vocab(stoi, itos)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  TOKENIZERS  (spaCy — required by the assignment)
-# ══════════════════════════════════════════════════════════════════════
 
 def get_tokenizers():
-    """
-    Return (de_tokenizer, en_tokenizer), each: str -> list[str].
-    Falls back to blank spaCy pipelines if full models are unavailable.
-    """
     import spacy
 
     def _load(full_name: str, lang_code: str):
@@ -92,12 +65,6 @@ def get_tokenizers():
 # ══════════════════════════════════════════════════════════════════════
 
 class Multi30kDataset(Dataset):
-    """
-    Loads one split of Multi30k (de->en) and converts to index tensors.
-
-    Vocab is built ONLY from the train split and reused for val/test
-    to avoid data leakage.
-    """
 
     HF_DATASET = "bentrevett/multi30k"
 
@@ -147,12 +114,10 @@ class Multi30kDataset(Dataset):
         return build_vocab_from_counter(counter, min_freq=min_freq)
 
     def build_vocab(self) -> None:
-        """Template-compat alias."""
         self.src_vocab = self._build_vocab(self.src_tokens, min_freq=2)
         self.tgt_vocab = self._build_vocab(self.tgt_tokens, min_freq=2)
 
     def _process_data(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        """Tokenize -> indices, wrap with <sos>…<eos>."""
         src_data, tgt_data = [], []
         for s_tok, t_tok in zip(self.src_tokens, self.tgt_tokens):
             s_ids = [SOS_IDX] + self.src_vocab.lookup_indices(s_tok) + [EOS_IDX]
@@ -162,7 +127,6 @@ class Multi30kDataset(Dataset):
         return src_data, tgt_data
 
     def process_data(self):
-        """Template-compat alias."""
         return self._process_data()
 
     def __len__(self) -> int:
@@ -172,13 +136,6 @@ class Multi30kDataset(Dataset):
         return self.src_data[idx], self.tgt_data[idx]
 
     def export_vocab_bundle(self, path: str = "vocab.pkl") -> None:
-        """
-        Pickle the vocab so Transformer.infer() can load it later.
-        Bundle layout expected by Transformer._load_vocab_from_drive:
-            src_vocab : dict  word->idx  (German)
-            tgt_vocab : dict  word->idx  (English)
-            tgt_itos  : list  idx->word  (English)
-        """
         bundle = {
             "src_vocab": self.src_vocab.stoi,
             "tgt_vocab": self.tgt_vocab.stoi,
@@ -195,12 +152,6 @@ class Multi30kDataset(Dataset):
 # ══════════════════════════════════════════════════════════════════════
 
 def collate_batch(batch):
-    """
-    Pad a list of (src, tgt) tensors to equal length.
-    Returns:
-        src_padded : LongTensor [batch, max_src_len]
-        tgt_padded : LongTensor [batch, max_tgt_len]
-    """
     from torch.nn.utils.rnn import pad_sequence
     src_list, tgt_list = zip(*batch)
     src_padded = pad_sequence(list(src_list), batch_first=True, padding_value=PAD_IDX)
